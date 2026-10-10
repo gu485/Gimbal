@@ -1,0 +1,275 @@
+{
+	"archive" : {},
+	"artifacts" : 
+	[
+		{
+			"path" : "third_party/libsegger_rtt.a"
+		}
+	],
+	"backtrace" : 1,
+	"backtraceGraph" : 
+	{
+		"commands" : 
+		[
+			"add_library",
+			"add_compile_options",
+			"add_definitions",
+			"target_include_directories"
+		],
+		"files" : 
+		[
+			"third_party/CMakeLists.txt",
+			"CMakeLists.txt"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 28,
+				"parent" : 0
+			},
+			{
+				"file" : 1
+			},
+			{
+				"command" : 1,
+				"file" : 1,
+				"line" : 52,
+				"parent" : 2
+			},
+			{
+				"command" : 2,
+				"file" : 1,
+				"line" : 70,
+				"parent" : 2
+			},
+			{
+				"command" : 2,
+				"file" : 1,
+				"line" : 70,
+				"parent" : 2
+			},
+			{
+				"command" : 2,
+				"file" : 1,
+				"line" : 79,
+				"parent" : 2
+			},
+			{
+				"command" : 2,
+				"file" : 1,
+				"line" : 70,
+				"parent" : 2
+			},
+			{
+				"command" : 2,
+				"file" : 1,
+				"line" : 70,
+				"parent" : 2
+			},
+			{
+				"command" : 2,
+				"file" : 1,
+				"line" : 86,
+				"parent" : 2
+			},
+			{
+				"command" : 3,
+				"file" : 0,
+				"line" : 33,
+				"parent" : 0
+			}
+		]
+	},
+	"codemodelVersion" : 
+	{
+		"major" : 2,
+		"minor" : 11
+	},
+	"compileGroups" : 
+	[
+		{
+			"compileCommandFragments" : 
+			[
+				{
+					"fragment" : " -mcpu=cortex-m4 -mfpu=fpv4-sp-d16 -mfloat-abi=hard  -Wall -Wextra -Wpedantic -fdata-sections -ffunction-sections -O0 -g3 -mcpu=cortex-m4 -mfpu=fpv4-sp-d16 -mfloat-abi=hard  -Wall -Wextra -Wpedantic -fdata-sections -ffunction-sections -O0 -g3 -Wno-unused-parameter -Wno-missing-field-initializers -Wno-pedantic -Wno-unknown-pragmas -g -std=gnu11"
+				}
+			],
+			"defines" : 
+			[
+				{
+					"backtrace" : 4,
+					"define" : "DEBUG"
+				},
+				{
+					"backtrace" : 5,
+					"define" : "STM32F407xx"
+				},
+				{
+					"backtrace" : 6,
+					"define" : "STM32_HAL_FILENAME=\"stm32f4xx_hal.h\""
+				},
+				{
+					"backtrace" : 7,
+					"define" : "STM32_THREAD_SAFE_STRATEGY=2"
+				},
+				{
+					"backtrace" : 8,
+					"define" : "USE_HAL_DRIVER"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "USE_HAL_TICK"
+				}
+			],
+			"includes" : 
+			[
+				{
+					"backtrace" : 10,
+					"path" : "D:/ROBO/omni_skeleton/Gimbal/third_party/SEGGER/RTT"
+				},
+				{
+					"backtrace" : 10,
+					"path" : "D:/ROBO/omni_skeleton/Gimbal/third_party/SEGGER/Config"
+				}
+			],
+			"language" : "C",
+			"languageStandard" : 
+			{
+				"backtraces" : 
+				[
+					1
+				],
+				"standard" : "11"
+			},
+			"sourceIndexes" : 
+			[
+				0,
+				1
+			]
+		},
+		{
+			"compileCommandFragments" : 
+			[
+				{
+					"fragment" : " -mcpu=cortex-m4 -mfpu=fpv4-sp-d16 -mfloat-abi=hard  -Wall -Wextra -Wpedantic -fdata-sections -ffunction-sections -O0 -g3 -mcpu=cortex-m4 -mfpu=fpv4-sp-d16 -mfloat-abi=hard  -Wall -Wextra -Wpedantic -fdata-sections -ffunction-sections -O0 -g3 -x assembler-with-cpp -MMD -MP -g"
+				},
+				{
+					"backtrace" : 3,
+					"fragment" : "-x"
+				},
+				{
+					"backtrace" : 3,
+					"fragment" : "assembler-with-cpp"
+				}
+			],
+			"defines" : 
+			[
+				{
+					"backtrace" : 4,
+					"define" : "DEBUG"
+				},
+				{
+					"backtrace" : 5,
+					"define" : "STM32F407xx"
+				},
+				{
+					"backtrace" : 6,
+					"define" : "STM32_HAL_FILENAME=\"stm32f4xx_hal.h\""
+				},
+				{
+					"backtrace" : 7,
+					"define" : "STM32_THREAD_SAFE_STRATEGY=2"
+				},
+				{
+					"backtrace" : 8,
+					"define" : "USE_HAL_DRIVER"
+				},
+				{
+					"backtrace" : 9,
+					"define" : "USE_HAL_TICK"
+				}
+			],
+			"includes" : 
+			[
+				{
+					"backtrace" : 10,
+					"path" : "D:/ROBO/omni_skeleton/Gimbal/third_party/SEGGER/RTT"
+				},
+				{
+					"backtrace" : 10,
+					"path" : "D:/ROBO/omni_skeleton/Gimbal/third_party/SEGGER/Config"
+				}
+			],
+			"language" : "ASM",
+			"sourceIndexes" : 
+			[
+				2
+			]
+		}
+	],
+	"id" : "segger_rtt::@037116246cbfaaeb5504",
+	"name" : "segger_rtt",
+	"nameOnDisk" : "libsegger_rtt.a",
+	"paths" : 
+	{
+		"build" : "third_party",
+		"source" : "third_party"
+	},
+	"sourceGroups" : 
+	[
+		{
+			"name" : "Source Files",
+			"sourceIndexes" : 
+			[
+				0,
+				1
+			]
+		},
+		{
+			"name" : "",
+			"sourceIndexes" : 
+			[
+				2
+			]
+		}
+	],
+	"sources" : 
+	[
+		{
+			"backtrace" : 1,
+			"backtraces" : 
+			[
+				1
+			],
+			"compileGroupIndex" : 0,
+			"path" : "third_party/SEGGER/RTT/SEGGER_RTT.c",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"backtraces" : 
+			[
+				1
+			],
+			"compileGroupIndex" : 0,
+			"path" : "third_party/SEGGER/RTT/SEGGER_RTT_printf.c",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"backtraces" : 
+			[
+				1
+			],
+			"compileGroupIndex" : 1,
+			"path" : "third_party/SEGGER/RTT/SEGGER_RTT_ASM_ARMv7M.S",
+			"sourceGroupIndex" : 1
+		}
+	],
+	"type" : "STATIC_LIBRARY"
+}
