@@ -82,15 +82,17 @@ float WrapPi(float a) {
 namespace robot
 {
 
+bool Gimbal::spin_mode(void) const { return mode_ == kModeSpin; }
+
 void Gimbal::init(void)
 {
   if (inited_) return;
 
-  yaw_motor_ = GetMotorYaw();
-  yaw_pid_   = GetPidMotorYaw();
-  pitch_motor_ = GetMotorPitch();
-  pitch_pid_   = GetPidMotorPitch();
+  yaw_motor_    = GetMotorYaw();
+  pitch_motor_  = GetMotorPitch();
+  yaw_pid_      = GetPidMotorYaw();
   yaw_pid_spin_ = GetPidMotorYawSpin();
+  pitch_pid_    = GetPidMotorPitch();
   if (yaw_pid_ != nullptr) yaw_pid_->reset();
   if (yaw_pid_spin_ != nullptr) yaw_pid_spin_->reset();
 
@@ -98,164 +100,117 @@ void Gimbal::init(void)
   ready_  = false;
 }
 
-void Gimbal::UpdateTargetRate(void)
+void Gimbal::OnModeChange(void)
 {
-  /* 云台板没有接 DR16,摇杆和急停都从底盘经双板通讯转发过来。 */
-  auto* comm = GetGimbalChassisComm();
-  if (comm == nullptr) {
-    estop_ = true;
-    w_yaw_ = 0.0f;
-    stick_ = 0.0f;
-    return;
-  }
-
-  /* 底盘离线:目标角速度置 0,但不修改 estop_。
-   * OfflineChecker 初始就是 offline,上电第一帧到来之前如果锁存,
-   * 通信建立后永远解不开。 */
-  if (comm->isOffline()) {
-    w_yaw_ = 0.0f;
-    stick_ = 0.0f;
-    return;
-  }
-
-  /* 模式切换(跟随/分离 ↔ 小陀螺):换 PID 时两个都复位,避免旧积分带进新模式 */
-  const bool spin_now = (comm->chassis_data().spin_mode != 0u);
-  if (spin_now != spin_mode_) {
-    spin_mode_ = spin_now;
-    spin_init_done_ = false;   /* 每次进入/退出小陀螺都重新采 theta_init */
-    spin_calib_cnt_ = 0;
-    spin_calib_sum_ = 0.0f;
-    if (yaw_pid_ != nullptr) yaw_pid_->reset();
-    if (yaw_pid_spin_ != nullptr) yaw_pid_spin_->reset();
-    /* 斜率限制是从 torque_cmd_ 往上/往下爬的,这里必须清零:
-     * 不清的话退出小陀螺时残留的力矩会成为下次进入小陀螺的起点,
-     * 相当于一进模式就带着一个来历不明的力矩。 */
-    torque_cmd_ = 0.0f;
-  }
-
-  float raw = GimbalChassisComm::DequantizeStick(comm->chassis_data().rc_lh_q);
-
-  /* 云台使能位:小陀螺下底盘置 0(左摇杆左右被征用成横移)。
-   * 忽略摇杆,目标角速度 0,云台只靠速度环阻尼保持不转。 */
-  if (comm->chassis_data().gimbal_enabled == 0u) {
-    w_yaw_ = 0.0f;
-    stick_ = 0.0f;
-    return;
-  }
-
-  /* 信号有效性:摇杆值超出物理范围 = 脏数据 */
-  if (raw < -kRcValidRange || raw > kRcValidRange) {
-    estop_ = true;
-    w_yaw_ = 0.0f;
-    return;
-  }
-
-  /* 急停:底盘下发。通信在线且底盘没发急停时解除,避免初始离线永久锁死。 */
-  estop_ = (comm->chassis_data().estop != 0u);
-  if (estop_) {
-    w_yaw_ = 0.0f;
-    stick_ = 0.0f;
-    return;
-  }
-
-  float stick = raw;
-  if (stick > -kStickDeadzone && stick < kStickDeadzone) stick = 0.0f;
-  stick_ = stick;
-
-  /* ① 摇杆 × 系数 = 云台 yaw 目标角速度 w_yaw(rad/s) */
-  w_yaw_ = kYawRateKx * stick;
-
+  /* 换模式: 两个 yaw PID 都复位, 旧模式的积分 / 误差滤波不带进新模式。
+   * 力矩也清零: 小陀螺的斜率限制是从 torque_cmd_ 往上爬的,
+   * 不清的话退出小陀螺时残留的力矩会成为下次的起点。
+   * pitch 不动: 分离 / 跟随 / 小陀螺之间切换时 pitch 的零位和目标应保持。 */
+  if (yaw_pid_ != nullptr) yaw_pid_->reset();
+  if (yaw_pid_spin_ != nullptr) yaw_pid_spin_->reset();
+  torque_cmd_ = 0.0f;
+  w_yaw_      = 0.0f;
+  error_      = 0.0f;
+  spin_init_done_ = false;   /* 每次进入小陀螺都重新采 theta_init */
+  spin_calib_cnt_ = 0;
+  spin_calib_sum_ = 0.0f;
 }
 
-void Gimbal::UpdateTorqueCmd(void)
+void Gimbal::ResetControl(void)
 {
-  auto* imu = GetImu();
-  /* 小陀螺用独立 PID,其余模式用跟随/分离 PID */
-  hello_world::pid::Pid* pid = spin_mode_ ? yaw_pid_spin_ : yaw_pid_;
+  /* 未就绪: 力矩 0, PID 复位避免积分累积, pitch 零位作废(恢复后重新标定) */
+  torque_cmd_   = 0.0f;
+  pitch_torque_ = 0.0f;
+  error_        = 0.0f;
+  w_yaw_        = 0.0f;
+  if (yaw_pid_ != nullptr) yaw_pid_->reset();
+  if (yaw_pid_spin_ != nullptr) yaw_pid_spin_->reset();
+  spin_init_done_ = false;
+  spin_calib_cnt_ = 0;
+  spin_calib_sum_ = 0.0f;
+  pitch_calib_done_ = false;
+  pitch_calib_cnt_  = 0;
+  pitch_calib_sum_  = 0.0f;
+  pitch_target_ = pitch_current_ = 0.0f;
+  if (pitch_pid_ != nullptr) pitch_pid_->reset();
+}
 
-  if (estop_ || imu == nullptr || !imu->calib_done() || pid == nullptr) {
-    /* 急停或 IMU 没标定完:力矩 0,PID 复位避免积分累积 */
-    ready_ = false;
-    torque_cmd_ = 0.0f;
-    error_ = 0.0f;
-    if (yaw_pid_ != nullptr) yaw_pid_->reset();
-    if (yaw_pid_spin_ != nullptr) yaw_pid_spin_->reset();
-    return;
-  }
+void Gimbal::UpdateDataChassis(void)
+{
+  auto* comm = GetGimbalChassisComm();
+  auto* imu  = GetImu();
 
-  /* === 小陀螺:yaw 位置环 ===
-   * ① 进入时采 kSpinInitSamples 次 IMU yaw 取平均 → theta_init(之后定死)
-   * ② theta_now = IMU yaw;theta = theta_now − theta_init(回绕到 [-π, π))
-   * ③ 力矩 = PID(0, theta)(用 GetPidMotorYawSpin 单例),喂给 MIT 帧 */
-  if (spin_mode_) {
-    float psi = 0.0f;
-    imu->yaw(&psi);
-    theta_now_ = psi;
+  comm_ok_ = (comm != nullptr) && !comm->isOffline();
 
-    if (!spin_init_done_) {
-      /* 角度求均值要处理回绕:以第一个样本为参考累加回绕差 */
-      if (spin_calib_cnt_ == 0) spin_calib_ref_ = psi;
-      spin_calib_sum_ += WrapPi(psi - spin_calib_ref_);
-      if (++spin_calib_cnt_ >= kSpinInitSamples) {
-        theta_init_ = WrapPi(spin_calib_ref_ +
-                             spin_calib_sum_ / static_cast<float>(kSpinInitSamples));
-        spin_init_done_ = true;
-        pid->reset();
+  /* 急停唯一来源: 底盘经双板通讯下发的 estop 位。
+   * 后面所有急停下的动作都只读 gimbal_estop_, 不在别处再赋值。 */
+  gimbal_estop_ = (comm == nullptr) || (comm->chassis_data().estop != 0u);
+
+  stick_ = 0.0f;
+  pitch_stick_ = 0.0f;
+
+  if (comm_ok_) {
+    /* 底盘模式; 编号越界按 INIT 处理 */
+    uint8_t m = comm->chassis_data().work_mode;
+    if (m > kModeEmergency) m = kModeInit;
+    if (m != mode_) {
+      mode_ = m;
+      OnModeChange();
+    }
+
+    /* 摇杆: 反量化 + 有效性 + 死区。云台使能位为 0 时忽略摇杆。 */
+    if (comm->chassis_data().gimbal_enabled != 0u) {
+      const float lh = GimbalChassisComm::DequantizeStick(comm->chassis_data().rc_lh_q);
+      const float lv = GimbalChassisComm::DequantizeStick(comm->chassis_data().rc_lv_q);
+      if (lh >= -kRcValidRange && lh <= kRcValidRange &&
+          (lh <= -kStickDeadzone || lh >= kStickDeadzone)) {
+        stick_ = lh;
       }
-      /* 采集期间力矩 0 */
-      torque_cmd_ = 0.0f;
-      error_ = 0.0f;
-      ready_ = true;
-      return;
+      if (lv >= -kRcValidRange && lv <= kRcValidRange &&
+          (lv <= -kPitchStickDeadzone || lv >= kPitchStickDeadzone)) {
+        pitch_stick_ = lv;
+      }
     }
-
-    const float theta = WrapPi(theta_now_ - theta_init_);
-    error_ = theta;
-
-    /* PID 目标力矩 → 斜率限制 → 实际下发力矩。
-     * 斜率限制只加在小陀螺位置环上:跟随/分离的速度环不加,
-     * 那里本来就靠 kp 直接给响应,加限速反而会让跟手变肉。 */
-    const float torque_raw = kSpinTorqueSign * pid->calc(0.0f, theta);
-    if (torque_raw > torque_cmd_ + kSpinTorqueStep) {
-      torque_cmd_ += kSpinTorqueStep;
-    } else if (torque_raw < torque_cmd_ - kSpinTorqueStep) {
-      torque_cmd_ -= kSpinTorqueStep;
-    } else {
-      torque_cmd_ = torque_raw;
-    }
-    ready_ = true;
-    return;
   }
 
-  /* 实测角速度:IMU 陀螺仪 z 轴(已扣开机零漂) */
+  /* 就绪: 通讯在线 + 非急停 + IMU 标定完成 + 底盘处于三个工作模式之一 */
+  const bool imu_ok = (imu != nullptr) && imu->calib_done();
+  const bool mode_ok = (mode_ == kModeSeparated || mode_ == kModeFollow ||
+                        mode_ == kModeSpin);
+  ready_ = comm_ok_ && !gimbal_estop_ && imu_ok && mode_ok;
+}
+
+void Gimbal::YawRateLoop(void)
+{
+  /* ① 摇杆 x 系数 = 云台 yaw 目标角速度 w_yaw(rad/s) */
+  w_yaw_ = kYawRateKx * stick_;
+
+  /* 实测角速度: IMU 陀螺仪 z 轴(已扣开机零漂) */
   float g3[3] = {0.0f, 0.0f, 0.0f};
-  imu->gyro(g3);
+  GetImu()->gyro(g3);
   w_current_ = kYawRateSign * g3[2];
 
-  /* PID(w_yaw, w_current) → 力矩(N·m) */
+  /* ② PID(w_yaw, w_current) -> 力矩(N·m) */
   error_ = w_yaw_ - w_current_;
-  torque_cmd_ = pid->calc(w_yaw_, w_current_);
-  ready_ = true;
+  torque_cmd_ = yaw_pid_->calc(w_yaw_, w_current_);
 }
 
-void Gimbal::UpdatePitch(void)
+void Gimbal::PitchAngleLoop(bool follow_stick)
 {
+  pitch_torque_ = 0.0f;
   if (pitch_motor_ == nullptr || pitch_pid_ == nullptr) return;
 
-  auto* comm = GetGimbalChassisComm();
-  /* 通信离线 / 急停 / 电机未使能: 力矩 0, 下次重新标定零位 */
-  if (comm == nullptr || comm->isOffline() || estop_ ||
-      !pitch_motor_->is_enabled()) {
+  /* pitch 电机未使能: 力矩 0, 零位作废 */
+  if (!pitch_motor_->is_enabled()) {
     pitch_calib_done_ = false;
     pitch_calib_cnt_  = 0;
     pitch_calib_sum_  = 0.0f;
-    pitch_target_ = pitch_current_ = pitch_torque_ = 0.0f;
+    pitch_target_ = pitch_current_ = 0.0f;
     pitch_pid_->reset();
-    pitch_motor_->setMitInput(0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
     return;
   }
 
-  /* ① 刚进入角度模式: 采 100 次 pitch 电机反馈角度取平均 → pitch0, 采集期间力矩 0 */
+  /* ① 刚进入角度模式: 采 100 次 pitch 电机反馈角度取平均 -> pitch0, 采集期间力矩 0 */
   if (!pitch_calib_done_) {
     pitch_calib_sum_ += pitch_motor_->angle();
     if (++pitch_calib_cnt_ >= kPitchCalibSamples) {
@@ -264,53 +219,127 @@ void Gimbal::UpdatePitch(void)
       pitch_target_ = 0.0f;
       pitch_pid_->reset();
     }
-    pitch_motor_->setMitInput(0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
     return;
   }
 
-  /* ② 摇杆上下 × k_pitch = 目标角度(不是角速度)。
-   * 小陀螺下左杆被征用成平移,pitch 目标保持不变。 */
-  if (!spin_mode_ && comm->chassis_data().gimbal_enabled != 0u) {
-    float lv = GimbalChassisComm::DequantizeStick(comm->chassis_data().rc_lv_q);
-    if (lv > -kPitchStickDeadzone && lv < kPitchStickDeadzone) lv = 0.0f;
-    float t = kPitchK * lv;
+  /* ② 摇杆上下 x k_pitch = 目标角度(不是角速度)。
+   * 小陀螺下左杆被征用成平移, follow_stick=false, 目标保持不变。 */
+  if (follow_stick) {
+    float t = kPitchK * pitch_stick_;
     if (t >  kPitchLimit) t =  kPitchLimit;
     if (t < -kPitchLimit) t = -kPitchLimit;
     pitch_target_ = t;
   }
 
-  /* ③④ pitch1 = 反馈角度, pitch_current = pitch1 − pitch0 */
+  /* ③④ pitch1 = 反馈角度, pitch_current = pitch1 - pitch0 */
   const float pitch1 = pitch_motor_->angle();
   pitch_current_ = pitch1 - pitch0_;
 
-  /* ⑤ PID(目标, 当前) → 力矩 → MIT 帧 */
+  /* ⑤ PID(目标, 当前) -> 力矩 */
   pitch_torque_ = pitch_pid_->calc(pitch_target_, pitch_current_);
-  pitch_motor_->setMitInput(0.0f, 0.0f, 0.0f, 0.0f, pitch_torque_);
+}
+
+void Gimbal::RunSeparated(void)
+{
+  /* 分离: yaw 速度环(摇杆 -> 角速度), pitch 角度环(摇杆 -> 角度)。
+   * 目前与跟随共用同一个 yaw 速度环 PID; 以后要分开调参, 在这里换成独立的 PID 单例。 */
+  YawRateLoop();
+  PitchAngleLoop(true);
+}
+
+void Gimbal::RunFollow(void)
+{
+  /* 跟随: yaw 速度环, pitch 角度环。底盘追云台的部分在底盘板, 这里与分离一致。 */
+  YawRateLoop();
+  PitchAngleLoop(true);
+}
+
+void Gimbal::YawThetaLoop(void)
+{
+  /* ① 进入时采 kSpinInitSamples 次 IMU yaw 取平均 -> theta_init(之后定死)
+   * ② theta_now = IMU yaw;theta = theta_now - theta_init(回绕到 [-pi, pi))
+   * ③ 力矩 = 符号 x PID(0, theta)(用 GetPidMotorYawSpin 单例), 再过斜率限制 */
+  float psi = 0.0f;
+  GetImu()->yaw(&psi);
+  theta_now_ = psi;
+
+  if (!spin_init_done_) {
+    /* 角度求均值要处理回绕:以第一个样本为参考累加回绕差 */
+    if (spin_calib_cnt_ == 0) spin_calib_ref_ = psi;
+    spin_calib_sum_ += WrapPi(psi - spin_calib_ref_);
+    if (++spin_calib_cnt_ >= kSpinInitSamples) {
+      theta_init_ = WrapPi(spin_calib_ref_ +
+                           spin_calib_sum_ / static_cast<float>(kSpinInitSamples));
+      spin_init_done_ = true;
+      yaw_pid_spin_->reset();
+    }
+    /* 采集期间力矩 0 */
+    torque_cmd_ = 0.0f;
+    error_ = 0.0f;
+    return;
+  }
+
+  const float theta = WrapPi(theta_now_ - theta_init_);
+  error_ = theta;
+
+  /* PID 目标力矩 -> 斜率限制 -> 实际下发力矩。
+   * 斜率限制只加在位置环上: 速度环靠 kp 直接响应, 加限速会让跟手变肉。 */
+  const float torque_raw = kSpinTorqueSign * yaw_pid_spin_->calc(0.0f, theta);
+  if (torque_raw > torque_cmd_ + kSpinTorqueStep) {
+    torque_cmd_ += kSpinTorqueStep;
+  } else if (torque_raw < torque_cmd_ - kSpinTorqueStep) {
+    torque_cmd_ -= kSpinTorqueStep;
+  } else {
+    torque_cmd_ = torque_raw;
+  }
+}
+
+void Gimbal::RunSpin(void)
+{
+  /* 小陀螺: yaw 位置环(锁定进入时的朝向), pitch 角度环(目标保持不变)。 */
+  YawThetaLoop();
+  PitchAngleLoop(false);
 }
 
 void Gimbal::update(void)
 {
   if (!inited_) init();
 
-  /* 电机不可用时不能往下走,否则 setMitInput 打在空指针上 */
-  if (yaw_motor_ == nullptr) {
+  /* 电机或 PID 不可用时不能往下走,否则 setMitInput / calc 打在空指针上 */
+  if (yaw_motor_ == nullptr || yaw_pid_ == nullptr || yaw_pid_spin_ == nullptr) {
     ready_ = false;
     return;
   }
 
-  UpdateTargetRate();
-  UpdatePitch();
-  UpdateTorqueCmd();
+  UpdateDataChassis();
+
+  if (ready_) {
+    switch (mode_) {
+      case kModeSeparated: RunSeparated(); break;
+      case kModeFollow:    RunFollow();    break;
+      case kModeSpin:      RunSpin();      break;
+      default:             ready_ = false; break;   /* 不会走到: ready_ 已含模式判断 */
+    }
+  }
+  if (!ready_) {
+    ResetControl();
+  }
 
   if (!ready_) {
-    /* 急停 / IMU 未就绪:五个参数全 0,电机不出力。
+    /* 急停 / IMU 未就绪 / 离线: yaw 和 pitch 五个参数全 0, 电机不出力。
      * 仍要发帧(达妙不发指令就认为通信丢失)。 */
     yaw_motor_->setMitInput(0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+    if (pitch_motor_ != nullptr) {
+      pitch_motor_->setMitInput(0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+    }
     return;
   }
 
   /* MIT 帧只用力矩字段:pos / vel / kp / kd 全 0,电机只当力矩执行器 */
   yaw_motor_->setMitInput(0.0f, 0.0f, 0.0f, 0.0f, torque_cmd_);
+  if (pitch_motor_ != nullptr) {
+    pitch_motor_->setMitInput(0.0f, 0.0f, 0.0f, 0.0f, pitch_torque_);
+  }
 }
 
 }  // namespace robot

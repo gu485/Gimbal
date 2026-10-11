@@ -50,6 +50,7 @@ volatile float   g_dbg_gimbal_measure  = 0.0f;  /* 实测角速度 w_current rad
 volatile float   g_dbg_gimbal_error    = 0.0f;  /* 速度误差 rad/s */
 volatile float   g_dbg_gimbal_torque   = 0.0f;  /* PID 输出力矩 N·m(±3 限幅) */
 volatile bool    g_dbg_gimbal_ready    = false; /* IMU 就绪且已对齐目标 */
+volatile uint8_t g_dbg_gimbal_mode     = 0;     /* 底盘模式 0=INIT 1=分离 2=跟随 3=小陀螺 4=急停 */
 volatile bool    g_dbg_gimbal_spin     = false; /* 1=正在用小陀螺 PID */
 volatile bool    g_dbg_gimbal_estop    = false; /* 急停锁存:1=已锁,云台输出全零 */
 volatile uint32_t g_dbg_yaw_frame_cnt  = 0;
@@ -137,9 +138,8 @@ void CommTask(void) {
   g_dbg_tick++;
 
   /* 喂独立看门狗。
-   * iwdg.c 配置:LSI 32kHz / Prescaler 32 = 1kHz,Reload 600 → 超时 600ms。
-   * 不喂的话每 600ms 硬件复位一次(g_dbg_tick 归零就是这个现象),
-   * 而 IMU 标定需要 1000 拍 = 1000ms,永远标不完。 */
+   * iwdg.c 配置:LSI 32kHz / Prescaler 32 ≈ 1kHz,Reload 400 → 超时约 400ms。
+   * 每拍(1ms)喂一次;不喂的话每 400ms 硬件复位一次(g_dbg_tick 归零就是这个现象)。 */
   HAL_IWDG_Refresh(&hiwdg);
 
   /* 同步调试镜像。imu::Imu 的 getter 收的是 float* 而不是 volatile float*,
@@ -238,6 +238,7 @@ void CommTask(void) {
     g_dbg_gimbal_ready   = gimbal->ready();
     g_dbg_gimbal_estop   = gimbal->estop();
     g_dbg_gimbal_spin    = gimbal->spin_mode();
+    g_dbg_gimbal_mode    = gimbal->mode();
     g_dbg_pitch0         = gimbal->pitch0();
     g_dbg_pitch_target   = gimbal->pitch_target();
     g_dbg_pitch_current  = gimbal->pitch_current();

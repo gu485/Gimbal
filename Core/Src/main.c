@@ -104,7 +104,6 @@ int main(void)
   MX_USART3_UART_Init();
   MX_USART6_UART_Init();
   MX_TIM6_Init();
-  MX_IWDG_Init();
   MX_TIM10_Init();
   MX_I2C2_Init();
   MX_TIM3_Init();
@@ -117,6 +116,10 @@ int main(void)
 
   HAL_TIM_Base_Start_IT(&htim4);
   HAL_GPIO_WritePin(GPIOH, GPIO_PIN_11, GPIO_PIN_RESET);
+  /* 看门狗在所有阻塞初始化(MainTaskInit 里的 IMU 初始化)之后才启动:
+   * IWDG 一旦启动就停不下来, 提前启动而初始化耗时超过超时时间会开机即复位。
+   * CubeMX 里已勾选「不生成 MX_IWDG_Init 调用」, 这里是唯一的启动点。
+   * 喂狗在 CommTask() 里(1kHz 控制中断)。 */
   MX_IWDG_Init();
   HAL_TIM_Base_Start_IT(&htim2);
   HAL_TIM_Base_Start_IT(&htim6);
