@@ -22,7 +22,7 @@
 #include "gimbal.hpp"    // robot::Gimbal 完整定义
 #include "imu.hpp"       // Imu 完整定义
 #include "iwdg.h"        // hiwdg / HAL_IWDG_Refresh
-#include "can.h"         // hcan1
+#include "can.h"         // hcan1 / hcan2
 #include "usart.h"       // huart3(DT7 走 USART3)
 #include "HW_can.hpp"    // CAN_Send_Msg
 #include "ins_comm.hpp"  // GetRemoteControl(DT7 单例)
@@ -52,7 +52,22 @@ volatile float   g_dbg_gimbal_torque   = 0.0f;  /* PID 输出力矩 N·m(±3 限
 volatile bool    g_dbg_gimbal_ready    = false; /* IMU 就绪且已对齐目标 */
 volatile bool    g_dbg_gimbal_spin     = false; /* 1=正在用小陀螺 PID */
 volatile bool    g_dbg_gimbal_estop    = false; /* 急停锁存:1=已锁,云台输出全零 */
-volatile uint32_t g_dbg_yaw_frame_cnt  = 0;     /* CAN 帧计数,确认真在发 */
+volatile uint32_t g_dbg_yaw_frame_cnt  = 0;
+/* === pitch 电机通信调试(Ozone 搜 g_dbg_pitch) ===
+ * frame_cnt : CAN2 发帧计数
+ * enabled   : 电机已使能(收到过状态码=1 的反馈)
+ * status    : 状态码 0=失能 1=使能 8~15=故障
+ * angle/vel : 反馈角度 rad / 角速度 rad/s,手转电机应跟着变 */
+volatile uint32_t g_dbg_pitch_frame_cnt = 0;
+volatile bool     g_dbg_pitch_enabled   = false;
+volatile uint8_t  g_dbg_pitch_status    = 0;
+volatile float    g_dbg_pitch_angle     = 0.0f;
+volatile float    g_dbg_pitch_vel       = 0.0f;
+volatile float    g_dbg_pitch0          = 0.0f;  /* 零位(100 次平均) */
+volatile float    g_dbg_pitch_target    = 0.0f;  /* 目标角度 rad */
+volatile float    g_dbg_pitch_current   = 0.0f;  /* pitch1 − pitch0 */
+volatile float    g_dbg_pitch_torque    = 0.0f;  /* PID 输出力矩 N·m */
+volatile bool     g_dbg_pitch_calib     = false; /* 零位标定完成 */     /* CAN 帧计数,确认真在发 */
 
 
 /* === 双板通讯调试 === */
@@ -94,6 +109,11 @@ void CommTaskInit(void) {
   CanFilter_Init(&hcan1);
   HAL_CAN_Start(&hcan1);
   HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING);
+
+  /* CAN2:pitch 电机(DM4310, ID=1) */
+  CanFilter_Init(&hcan2);
+  HAL_CAN_Start(&hcan2);
+  HAL_CAN_ActivateNotification(&hcan2, CAN_IT_RX_FIFO1_MSG_PENDING);
 
   /* DT7 遥控器接收启动:USART3 + 空闲中断 + DMA。
    * CubeMX 把 RX DMA 配成了 CIRCULAR:循环模式下缓冲区不会在帧边界重新对齐,
@@ -159,6 +179,22 @@ void CommTask(void) {
     }
   }
 
+  /* === pitch 电机 (CAN2, ID=1) ===
+   * 力矩由 Gimbal::UpdatePitch() 写入电机对象, 这里只负责每拍 encode + 发送。 */
+  {
+    auto* pitch = GetMotorPitch();
+    if (pitch != nullptr) {
+      uint8_t pdata[8] = {0};
+      pitch->encode(pdata);
+      CAN_Send_Msg(&hcan2, pdata, pitch->tx_id(), 8);
+      g_dbg_pitch_frame_cnt++;
+      g_dbg_pitch_enabled = pitch->is_enabled();
+      g_dbg_pitch_status  = static_cast<uint8_t>(pitch->status_code());
+      g_dbg_pitch_angle   = pitch->angle();
+      g_dbg_pitch_vel     = pitch->vel();
+    }
+  }
+
   /* === 双板通讯:云台 → 底盘 (0x211) ===
    *
    * 发的是"云台当前的世界朝向"(来自 IMU)和 IMU 就绪标志。
@@ -202,6 +238,11 @@ void CommTask(void) {
     g_dbg_gimbal_ready   = gimbal->ready();
     g_dbg_gimbal_estop   = gimbal->estop();
     g_dbg_gimbal_spin    = gimbal->spin_mode();
+    g_dbg_pitch0         = gimbal->pitch0();
+    g_dbg_pitch_target   = gimbal->pitch_target();
+    g_dbg_pitch_current  = gimbal->pitch_current();
+    g_dbg_pitch_torque   = gimbal->pitch_torque();
+    g_dbg_pitch_calib    = gimbal->pitch_ready();
 
   }
 

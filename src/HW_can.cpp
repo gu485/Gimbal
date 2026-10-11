@@ -43,11 +43,20 @@ volatile uint32_t g_can1_c2g_cnt    = 0;
 volatile uint32_t g_can1_yaw_fb_cnt = 0;
 volatile uint32_t g_can1_last_id    = 0;
 
+/* === CAN2 (pitch 电机) 接收调试计数 ===
+ * pitch_fb_cnt : 命中 pitch 电机反馈帧的次数,涨 = 电机在回话,通信通 */
+volatile uint32_t g_can2_rx_cnt      = 0;
+volatile uint32_t g_can2_last_id     = 0;
+volatile uint32_t g_can2_pitch_fb_cnt = 0;
+
 /* Exported function definitions ---------------------------------------------*/
 
 void CanFilter_Init(CAN_HandleTypeDef *hcan)
 {
-  CAN_FilterTypeDef can_filter;
+  CAN_FilterTypeDef can_filter = {};
+  /* 未初始化的 SlaveStartFilterBank 会被 HAL 写进 CAN_FMR,
+   * 随机值可能让 CAN2 的滤波器组失效(收不到帧)。F4 上 CAN2 用 14~27 号组。 */
+  can_filter.SlaveStartFilterBank = 14;
 
   /* 全收：掩码全 0，任何 ID 均通过 */
   can_filter.FilterMode = CAN_FILTERMODE_IDMASK;
@@ -142,8 +151,16 @@ extern "C" void HAL_CAN_RxFifo1MsgPendingCallback(CAN_HandleTypeDef *hcan)
   if (hcan == &hcan2) {
     if (HAL_CAN_GetRxMessage(hcan, CAN_RX_FIFO1, &rx_header2,
                              can2_rx_data) == HAL_OK) {
-      /* CAN2 上目前没有本板关心的帧(云台电机和双板通讯都在 CAN1),
-       * 留空即可。以后要在 CAN2 上挂设备时,按 rx_header2.StdId 分发。 */
+      g_can2_rx_cnt++;
+      g_can2_last_id = rx_header2.StdId;
+      /* CAN2 上只挂 pitch 电机(ID=1)。同 yaw:D[2]=0x33/0x55 是寄存器应答,不能当反馈解。 */
+      if (rx_header2.StdId == hello_world::motor::DM_J4310::GetRxId(1)) {
+        g_can2_pitch_fb_cnt++;
+        if (can2_rx_data[2] != 0x33 && can2_rx_data[2] != 0x55) {
+          auto* pitch = GetMotorPitch();
+          if (pitch != nullptr) pitch->decode(can2_rx_data);
+        }
+      }
     }
   }
   HAL_CAN_ActivateNotification(hcan, CAN_IT_RX_FIFO1_MSG_PENDING);

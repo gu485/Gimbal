@@ -40,3 +40,20 @@ hello_world::motor::DM_J4310 *GetMotorYaw() {
   }
   return motor;
 }
+
+hello_world::motor::DM_J4310 *GetMotorPitch() {
+  /* pitch 电机: DM4310, CAN2, ID=1。配置格式与 yaw 相同(MIT 模式、力矩输入、
+   * auto_enable、不做模式切换)。angle_offset 暂为 0(机械零点待标定),
+   * dir 暂用 kDirFwd,接入控制时再按实测转向修改。当前只验证通信。 */
+  static hello_world::motor::DM_J4310 *motor = nullptr;
+  if (motor == nullptr) {
+    hello_world::motor::OptionalParams opt;
+    opt.dir          = hello_world::motor::kDirFwd;
+    opt.input_type   = hello_world::motor::InputType::kTorq;
+    opt.angle_range  = hello_world::motor::AngleRange::kNegPiToPosPi;
+    opt.angle_offset = 0.0f;
+    motor = new hello_world::motor::DM_J4310(
+        /*id=*/1, opt, /*auto_enable=*/true, /*enable_mode_switch=*/false);
+  }
+  return motor;
+}

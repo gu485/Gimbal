@@ -32,5 +32,7 @@ class Pid;
 hello_world::pid::Pid *GetPidMotorYaw();
 /* 获取 yaw 关节「小陀螺模式」速度环 PID 单例(与上面的跟随/分离 PID 独立,单独调参)。 */
 hello_world::pid::Pid *GetPidMotorYawSpin();
+/* 获取 pitch 关节角度环 PID 单例。 */
+hello_world::pid::Pid *GetPidMotorPitch();
 
 #endif /* GIMBAL_INSTANCE_INS_PID_HPP_ */

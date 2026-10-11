@@ -42,13 +42,24 @@ class Gimbal
   /* 当前是否使用小陀螺 PID(底盘经双板通讯下发) */
   bool   spin_mode(void) const { return spin_mode_; }
 
+  /* pitch 调试读数 */
+  float  pitch_target(void) const { return pitch_target_; }    /* 目标角度 rad */
+  float  pitch_current(void) const { return pitch_current_; }  /* pitch1 − pitch0 */
+  float  pitch0(void) const { return pitch0_; }
+  float  pitch_torque(void) const { return pitch_torque_; }
+  bool   pitch_ready(void) const { return pitch_calib_done_; }
+
  private:
   /* 摇杆 → 目标角速度 w_yaw */
   void  UpdateTargetRate(void);
+  /* pitch 角度环:零位标定 + 摇杆→目标角度 + PID→力矩 */
+  void  UpdatePitch(void);
   /* w_yaw 与 IMU 角速度 → 速度环 PID → 力矩 */
   void  UpdateTorqueCmd(void);
 
   hello_world::motor::DM_J4310* yaw_motor_ = nullptr;
+  hello_world::motor::DM_J4310* pitch_motor_ = nullptr;
+  hello_world::pid::Pid*        pitch_pid_   = nullptr;
   hello_world::pid::Pid*        yaw_pid_   = nullptr;       /* 跟随/分离速度环 */
   hello_world::pid::Pid*        yaw_pid_spin_ = nullptr;    /* 小陀螺速度环(独立单例) */
 
@@ -60,6 +71,14 @@ class Gimbal
   bool  inited_      = false;
   bool  ready_       = false;  /* IMU 标定未完成 / 急停时为 false */
   bool  estop_       = false;
+  /* pitch 角度环状态 */
+  uint32_t pitch_calib_cnt_  = 0;
+  float    pitch_calib_sum_  = 0.0f;
+  bool     pitch_calib_done_ = false;
+  float    pitch0_           = 0.0f;   /* 刚进入角度模式时 100 次平均 */
+  float    pitch_target_     = 0.0f;
+  float    pitch_current_    = 0.0f;
+  float    pitch_torque_     = 0.0f;
   bool  spin_mode_   = false;  /* 小陀螺模式:位置环 */
   /* 小陀螺位置环:进入时采 kSpinInitSamples 次 IMU yaw 取平均 → theta_init(定死) */
   uint32_t spin_calib_cnt_  = 0;

@@ -28,5 +28,7 @@
  * 返回 DM_J4310* 而不是基类 Motor*：控制要用 setMitInput(),那是 DaMiao
  * 层的方法,声明成基类指针调用方就拿不到。 */
 hello_world::motor::DM_J4310 *GetMotorYaw();
+/* 获取云台 pitch 关节电机单例（DM-J4310, CAN2, ID=1）。 */
+hello_world::motor::DM_J4310 *GetMotorPitch();
 
 #endif /* GIMBAL_INSTANCE_INS_MOTOR_HPP_ */

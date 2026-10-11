@@ -29,6 +29,13 @@ constexpr float kYawRateSign = 1.0f;
 constexpr float kStickDeadzone = 0.05f;
 /* 摇杆/拨杆信号异常的判据:DBUS 解出来应该在 [-1, 1],超出是脏数据。 */
 constexpr float kRcValidRange = 1.2f;
+/* === pitch 角度环 === */
+constexpr uint32_t kPitchCalibSamples = 100;   /* 进入角度模式时的零位采样次数 */
+/* 摇杆满杆对应的目标角度(rad): pitch_target = k_pitch × 摇杆。方向反了改负号。 */
+constexpr float kPitchK = -1.0f;
+/* 目标角度限幅(rad),机械行程未标定前的安全保护 */
+constexpr float kPitchLimit = 1.0f;
+constexpr float kPitchStickDeadzone = 0.05f;
 /* 小陀螺进入时采集 IMU yaw 的次数(1kHz)。
  *
  * ⚠ 2026-10-10 从 1000 缩到 200:采集期间 torque_cmd_ 恒为 0,云台是
@@ -81,6 +88,8 @@ void Gimbal::init(void)
 
   yaw_motor_ = GetMotorYaw();
   yaw_pid_   = GetPidMotorYaw();
+  pitch_motor_ = GetMotorPitch();
+  pitch_pid_   = GetPidMotorPitch();
   yaw_pid_spin_ = GetPidMotorYawSpin();
   if (yaw_pid_ != nullptr) yaw_pid_->reset();
   if (yaw_pid_spin_ != nullptr) yaw_pid_spin_->reset();
@@ -229,6 +238,56 @@ void Gimbal::UpdateTorqueCmd(void)
   ready_ = true;
 }
 
+void Gimbal::UpdatePitch(void)
+{
+  if (pitch_motor_ == nullptr || pitch_pid_ == nullptr) return;
+
+  auto* comm = GetGimbalChassisComm();
+  /* 通信离线 / 急停 / 电机未使能: 力矩 0, 下次重新标定零位 */
+  if (comm == nullptr || comm->isOffline() || estop_ ||
+      !pitch_motor_->is_enabled()) {
+    pitch_calib_done_ = false;
+    pitch_calib_cnt_  = 0;
+    pitch_calib_sum_  = 0.0f;
+    pitch_target_ = pitch_current_ = pitch_torque_ = 0.0f;
+    pitch_pid_->reset();
+    pitch_motor_->setMitInput(0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+    return;
+  }
+
+  /* ① 刚进入角度模式: 采 100 次 pitch 电机反馈角度取平均 → pitch0, 采集期间力矩 0 */
+  if (!pitch_calib_done_) {
+    pitch_calib_sum_ += pitch_motor_->angle();
+    if (++pitch_calib_cnt_ >= kPitchCalibSamples) {
+      pitch0_ = pitch_calib_sum_ / static_cast<float>(kPitchCalibSamples);
+      pitch_calib_done_ = true;
+      pitch_target_ = 0.0f;
+      pitch_pid_->reset();
+    }
+    pitch_motor_->setMitInput(0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+    return;
+  }
+
+  /* ② 摇杆上下 × k_pitch = 目标角度(不是角速度)。
+   * 小陀螺下左杆被征用成平移,pitch 目标保持不变。 */
+  if (!spin_mode_ && comm->chassis_data().gimbal_enabled != 0u) {
+    float lv = GimbalChassisComm::DequantizeStick(comm->chassis_data().rc_lv_q);
+    if (lv > -kPitchStickDeadzone && lv < kPitchStickDeadzone) lv = 0.0f;
+    float t = kPitchK * lv;
+    if (t >  kPitchLimit) t =  kPitchLimit;
+    if (t < -kPitchLimit) t = -kPitchLimit;
+    pitch_target_ = t;
+  }
+
+  /* ③④ pitch1 = 反馈角度, pitch_current = pitch1 − pitch0 */
+  const float pitch1 = pitch_motor_->angle();
+  pitch_current_ = pitch1 - pitch0_;
+
+  /* ⑤ PID(目标, 当前) → 力矩 → MIT 帧 */
+  pitch_torque_ = pitch_pid_->calc(pitch_target_, pitch_current_);
+  pitch_motor_->setMitInput(0.0f, 0.0f, 0.0f, 0.0f, pitch_torque_);
+}
+
 void Gimbal::update(void)
 {
   if (!inited_) init();
@@ -240,6 +299,7 @@ void Gimbal::update(void)
   }
 
   UpdateTargetRate();
+  UpdatePitch();
   UpdateTorqueCmd();
 
   if (!ready_) {

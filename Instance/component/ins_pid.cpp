@@ -52,3 +52,22 @@ hello_world::pid::Pid *GetPidMotorYawSpin() {
   }
   return p;
 }
+
+hello_world::pid::Pid *GetPidMotorPitch() {
+  /* pitch 关节角度环 PID: 输入 (目标角度, 当前角度) rad, 输出力矩 N·m。
+   * kp [N·m/rad], kd [N·m/(rad/s)]。起步值偏小, 上机后再调:
+   *   软/到不了位 → kp 加;晃/超调 → kd 加;高频嗡嗡 → kd 减小或 beta 减小。
+   * pitch 行程有限, 误差不会跨 ±π, 无需回绕。ki 先为 0。 */
+  static hello_world::pid::Pid *p = nullptr;
+  if (p == nullptr) {
+    p = new hello_world::pid::Pid(
+        /*kp=*/        4.0f,
+        /*ki=*/        0.0f,
+        /*kd=*/        0.1f,
+        /*i_limit=*/   0.0f,
+        /*out_limit=*/ 2.0f,     /* N·m,先给小一点 */
+        /*dt=*/        0.001f,
+        /*beta=*/      0.2f);
+  }
+  return p;
+}
